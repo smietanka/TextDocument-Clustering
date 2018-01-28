@@ -11,6 +11,9 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics import confusion_matrix
 from sklearn.metrics import accuracy_score
 import matplotlib.pyplot as plt
+import itertools
+import operator
+from collections import defaultdict
 
 stemmer = SnowballStemmer("english")
 stopwords = set(stopwords.words('english'))
@@ -22,13 +25,16 @@ class RowFromFile(object):
         self.articleContent = articleContent
 
 def main():
+    #initialization variables
     original_documents = []
     all_documents = []
     haveClasses = True
-    testExcel = 'test2'
+    testExcel = 'test'
     folderName = 'ag_news_csv'
     path = "D:\STUDIA\\Praca Inżynierska\Klasteryzacja\Dane testowe\\" + folderName + "\\" + folderName + "\\"
     num_clusters = 4
+
+    #reading classes if it exists
     if haveClasses:
         with open(path + "classes.txt") as f:
             classes = f.readlines()
@@ -39,9 +45,22 @@ def main():
         spamreader = csv.reader(csvfile, delimiter=',', quotechar='"')
         for row in spamreader:
             if len(row) == 3:
-                all_documents.append(row[2])
                 original_documents.append(RowFromFile(int(row[0]), row[1], row[2]))
-        
+    
+    all_documents = [x.articleName + ' ' + x.articleContent for x in original_documents]
+
+    #region quantity of text documents per cluster
+    new_list = [list(g) for k, g in itertools.groupby(sorted(original_documents, key=operator.attrgetter('cluster')), operator.attrgetter('cluster'))]
+    clusterWithCountOfDocuments = []
+    a = 1
+    for it in new_list:
+        clusterWithCountOfDocuments.append((a, len(it)))
+        a += 1
+
+    print('Quantity of text documents per cluster')
+    print(clusterWithCountOfDocuments)
+    #endregion
+
     #clean documents
     all_documents = [cleanDocument(x) for x in all_documents]
     #tokenize documents
@@ -52,28 +71,26 @@ def main():
     all_documents = [StemDocument(x) for x in all_documents]
 
     # count tfidf
-    tfidf = TfidfVectorizer(norm='l2',min_df=1, use_idf=True)
+    tfidf = TfidfVectorizer(norm='l2',min_df=0, use_idf=True, smooth_idf=False, sublinear_tf=True)
     tfidfMatrix = tfidf.fit_transform(all_documents)
-    terms = tfidf.get_feature_names()
 
     # KMean
     from sklearn.cluster import KMeans
-    km = KMeans(n_clusters=num_clusters)
+    km = KMeans(n_clusters=num_clusters, max_iter=1000, n_jobs=4)
     km.fit(tfidfMatrix)
     clusters = km.labels_.tolist()
 
-
     #region Test
-    cluster_WithTexts = {}
-    k = 0
-    for i in clusters:
-        if i in cluster_WithTexts:
-            cluster_WithTexts[i].append(original_documents[k].cluster)
-        else:
-            cluster_WithTexts[i] = [original_documents[k].cluster]
-        k += 1
+    # cluster_WithTexts = {}
+    # k = 0
+    # for i in clusters:
+    #     if i in cluster_WithTexts:
+    #         cluster_WithTexts[i].append(original_documents[k].cluster)
+    #     else:
+    #         cluster_WithTexts[i] = [original_documents[k].cluster]
+    #     k += 1
 
-    cluster_most_words = {}
+    # cluster_most_words = {}
     # for cluster, data in cluster_WithTexts.items():
     #     #clean documents
     #     data = [cleanDocument(x) for x in data]
@@ -109,13 +126,55 @@ def main():
             table = [str(row[1]), str('%s' % row[0])]
             wr.writerow(table)
 
-    #http://scikit-learn.org/stable/modules/generated/sklearn.metrics.confusion_matrix.html
     testClass = [x.cluster for x in original_documents]
+
+    #region histogram
+    clustersWithOriginalClusters = {}
+    k = 0
+    for i in clusters:
+        if i in clustersWithOriginalClusters:
+            clustersWithOriginalClusters[i].append(original_documents[k].cluster)
+        else:
+            clustersWithOriginalClusters[i] = [original_documents[k].cluster]
+        k += 1
+    hist = plt.figure(2)
+    clusterMaxesHistogram = []
+    for key in sorted(clustersWithOriginalClusters.keys()):
+        tempMaxes = defaultdict(int)
+        for i in clustersWithOriginalClusters[key]:
+            tempMaxes[i] += 1
+        result = max(tempMaxes.items(), key=lambda x: x[1])
+        clusterMaxesHistogram.append((key + 1, int(result[0])))
+        plt.subplot(220 + 1 + key)
+        plt.xlim([1, num_clusters])
+        plt.hist(clustersWithOriginalClusters[key])
+        plt.ylabel('ilosc')
+        plt.xlabel('znalezione klastry przez algorytm')
+        plt.title('Klaster {0}'.format(key+1))
+    hist.show()
+
+    mappedClusters = mapClusters(originalPredictedClass, clusterMaxesHistogram)
+    fig3 = plt.figure(3)
+    cnf_matrix = confusion_matrix(testClass, mappedClusters)
+    print(cnf_matrix)
+    df_cm = pd.DataFrame(cnf_matrix, range(num_clusters), range(num_clusters))
+    sn.set(font_scale=1)
+    sn.heatmap(df_cm, annot=True, fmt='g', cmap='Blues')
+    plt.ylabel('Etykieta rzeczywista')
+    plt.xlabel('Etykieta predykowana')
+    plt.title('{0} %'.format(round(accuracy_score(testClass, mappedClusters) * 100, 2)))
+    if haveClasses:
+        tick_marks = np.arange(len(classes))
+        plt.xticks(tick_marks, classes, rotation=0)
+        plt.yticks(tick_marks, classes, rotation=0)
+    fig3.show()
+    #endregion
 
     #region map_predicted_classes
     plt.figure(1)
-    allCasesPredictedClass = dupa(originalPredictedClass, num_clusters)
+    allCasesPredictedClass = mapClustersForAllCases(originalPredictedClass, num_clusters)
     for index, predictedClass in enumerate(allCasesPredictedClass):
+        #http://scikit-learn.org/stable/modules/generated/sklearn.metrics.confusion_matrix.html
         cnf_matrix = confusion_matrix(testClass, predictedClass)
         print(cnf_matrix)
 
@@ -131,9 +190,9 @@ def main():
             tick_marks = np.arange(len(classes))
             plt.xticks(tick_marks, classes, rotation=0)
             plt.yticks(tick_marks, classes, rotation=0)
+    plt.show()
     #endregion
 
-    plt.show()
     return bool(1)
 
 def TokenizeDocument(document):
@@ -170,7 +229,7 @@ def RemoveStopWords(tokenizedDocument):
     removedStopWords = [word for word in tokenizedDocument if not word in stopwords]
     return " ".join(removedStopWords)
 
-def dupa(predClass, ilosc_klas):
+def mapClustersForAllCases(predClass, ilosc_klas):
     result = []
     #dodajemy oryginal:
     # 1=1; 2=2; 3=3; 4=4
@@ -188,4 +247,11 @@ def dupa(predClass, ilosc_klas):
         result.append(tempResult)
     return result
 
+def mapClusters(predClass, newMap):
+    result = []
+    for clas in predClass:
+        for map in newMap:
+            if map[1] == clas:
+                result.append(map[0])
+    return result
 main()
