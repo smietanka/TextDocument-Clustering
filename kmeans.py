@@ -29,7 +29,7 @@ def main():
     original_documents = []
     all_documents = []
     haveClasses = True
-    testExcel = 'test'
+    testExcel = 'test2'
     folderName = 'ag_news_csv'
     path = "D:\STUDIA\\Praca Inżynierska\Klasteryzacja\Dane testowe\\" + folderName + "\\" + folderName + "\\"
     num_clusters = 4
@@ -76,10 +76,16 @@ def main():
 
     # KMean
     from sklearn.cluster import KMeans
-    km = KMeans(n_clusters=num_clusters, max_iter=1000, n_jobs=4)
+    km = KMeans(n_clusters=num_clusters, max_iter=400)
     km.fit(tfidfMatrix)
     clusters = km.labels_.tolist()
 
+    #DBSCAN
+    # from sklearn.cluster import DBSCAN
+    # ds = DBSCAN(eps=0.5)
+    # dense = tfidfMatrix.todense()
+    # ds.fit_predict(dense)
+    # clusters = ds.labels_.tolist()
     #region Test
     # cluster_WithTexts = {}
     # k = 0
